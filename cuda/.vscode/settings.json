@@ -63,6 +63,14 @@
         "typeinfo": "cpp",
         "variant": "cpp",
         "format": "cpp",
-        "__nullptr": "cpp"
+        "__nullptr": "cpp",
+        "any": "cpp",
+        "cinttypes": "cpp",
+        "complex": "cpp",
+        "map": "cpp",
+        "set": "cpp",
+        "expected": "cpp",
+        "shared_mutex": "cpp",
+        "cfenv": "cpp"
     }
 }
