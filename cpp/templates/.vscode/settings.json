@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "*.sdf": "xml",
+        "*.world": "xml",
+        "type_traits": "cpp"
+    }
+}
