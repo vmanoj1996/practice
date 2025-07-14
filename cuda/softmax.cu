@@ -1,13 +1,14 @@
 #include <cuda_runtime.h>
 #include <iostream>
 
-__global__ void exp_kernel(const float* input, float* output, int N)
+
+__global__ void exp_kernel(float* output, int N)
 {
     // make the exponents and store the intermediates in another variable
     int global_index = blockIdx.x * blockDim.x + threadIdx.x;
     if(global_index<N)
     {
-        output[global_index] = expf(input[global_index]);
+        output[global_index] = expf(output[global_index]);
     }
 }
 
@@ -66,14 +67,6 @@ __global__ void reduce_kernel(const float* input, float* output, int N, Operatio
     if(thread_index == 0) output[blockIdx.x] = shared_data[0];
 }
 
-struct FusedExpMax
-{
-    float safe_value = INFINITY;
-    __device__ float operator()(float a, float b){return fminf(a, b);}
-    __device__ float alloc(float a) {return a;}
-};
-
-
 template<typename Operation>
 float reduce_operation(float* input, float* output, int N, const Operation& op)
 {
@@ -128,26 +121,34 @@ struct SumOperation
     __device__ float alloc(float a) {return a;}
 };
 
+__global__ void minus_kernel(float* input, int N, float value)
+{
+    // make the exponents and store the intermediates in another variable
+    int global_index = blockIdx.x * blockDim.x + threadIdx.x;
+    if(global_index>=N) return;
+
+    input[global_index] = input[global_index] - value;
+}
 
 // input, output are device pointers (i.e. pointers to memory on the GPU)
 void solve(const float* input, float* output, int N) {
     int threadsPerBlock = 256;
     int blocksPerGrid = (N + threadsPerBlock - 1) / threadsPerBlock;
 
-    exp_kernel<<<blocksPerGrid, threadsPerBlock>>>(input, output, N);
-
     // lets find the max and rescale. cub style allocation 
-    float *temp_input;
-    float *temp_output;
+    float *temp_input, *temp_output;
     cudaMalloc(&temp_input,  N*sizeof(float));
     cudaMalloc(&temp_output, blocksPerGrid*sizeof(float));
 
     // alloc input and find the maximum
+    cudaMemcpy(output, input, N*sizeof(float), cudaMemcpyDefault);
     cudaMemcpy(temp_input, output, N*sizeof(float), cudaMemcpyDefault);
     float max_value = reduce_operation(temp_input, temp_output, N, MaxOperation());
 
-    // scale operation
-    scale_kernel<<<blocksPerGrid, threadsPerBlock>>>(output, N, 1.0f/max_value);
+    // subtract from max operation
+    minus_kernel<<<blocksPerGrid, threadsPerBlock>>>(output, N, max_value);
+
+    exp_kernel<<<blocksPerGrid, threadsPerBlock>>>(output, N);
 
     // reduce sum now
     cudaMemcpy(temp_input, output, N*sizeof(float), cudaMemcpyDefault);
@@ -155,9 +156,12 @@ void solve(const float* input, float* output, int N) {
 
     scale_kernel<<<blocksPerGrid, threadsPerBlock>>>(output, N, 1.0f/sum_value);
 
+
+    cudaFree(temp_input);
+    cudaFree(temp_output);
+
     cudaDeviceSynchronize();
 }
-
 
 int main() {
     const int N = 3;
