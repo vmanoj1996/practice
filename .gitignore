@@ -2,6 +2,7 @@
 build/
 *.d
 *.a.out
+*.swp
 
 # Compiled Object files
 *.slo

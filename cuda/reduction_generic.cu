@@ -81,6 +81,8 @@ float reduce_operation(float* input, float* output, int N, const Operation& op)
     const int threadsPerBlock = 256;
     const int blocksPerGrid = (N + threadsPerBlock - 1) / threadsPerBlock;
     // doing recursive reduction as that is more easy to understand and keep things from getting more memory messy
+
+    
     
     reduce_kernel<<<blocksPerGrid, threadsPerBlock, threadsPerBlock*sizeof(float)>>>(input, output, N, op);
     cudaDeviceSynchronize();

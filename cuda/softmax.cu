@@ -11,69 +11,52 @@ __global__ void exp_kernel(const float* input, float* output, int N)
     }
 }
 
-__global__ void reduce_max_kernel(const float* input, float* output, int N)
-{
-    // make the exponents and store the intermediates in another variable
-    int global_index = blockIdx.x * blockDim.x + threadIdx.x;
-    if(global_index>N) return;
-
-    // simple reduce kernel that makes use of shared memory between the threads (registers are even faster)
-
-
-
-    // Find the max number
-    
-    // Scale all the numbers with that max
-
-    // Perform reduce sum on that thing
-
-    // do the division operation
-
-    // set the outputs
-}
-
-void reduce_max(const float* input)
-{
-
-}
-
 __global__ void scale_kernel(float* input, int N, float scale)
 {
     // make the exponents and store the intermediates in another variable
     int global_index = blockIdx.x * blockDim.x + threadIdx.x;
-    if(global_index>N) return;
+    if(global_index>=N) return;
 
     input[global_index] = scale * input[global_index];
 }
 
-__global__ void reduce_kernel(const float* input, float* output, int N)
+struct MinOperation
+{
+    float safe_value = INFINITY;
+    __device__ float operator()(float a, float b){return fminf(a, b);}
+    __device__ float alloc(float a) {return a;}
+};
+
+
+template<typename Operation>
+__global__ void reduce_kernel(const float* input, float* output, int N, Operation op)
 {
     // make the exponents and store the intermediates in another variable
     int global_index = blockIdx.x * blockDim.x + threadIdx.x;
     int thread_index = threadIdx.x;
     
     // Think about the exit operation
-    if(global_index>=N) return;
 
     // declare the shared memory. It is allocated else where
-    __shared__ float shared_data[blockDim.x];
+    extern __shared__ float shared_data[];
 
     // allocate the inputs
     // if(global_index>)
-    shared_data[threadIdx.x] = input[global_index];
+    //  in case of early return, previous garbage may be there in shared memory which will mess up the sum
+    shared_data[thread_index] = (global_index < N) ? op.alloc(input[global_index]) : op.safe_value;
 
     // do not move to the next step before all the threads converge on this stage for this particular block
     __syncthreads();
 
     // reduce from 256 to 128 to 64 to 32 ... 1
     // assumption the blockDim.x is a power of 2. else we will lose a few numbers by this logic
-    for(int layersize = blockDim.x/2; layersize>1; layersize /= 2)
+    for(int layersize = blockDim.x/2; layersize>0; layersize /= 2)
     {   
         if(thread_index<layersize)
         {
-            shared_data[thread_index] += shared_data[layersize+thread_index];
-            __syncthreads();
+            shared_data[thread_index] = op(shared_data[thread_index], shared_data[layersize+thread_index]);
         }
+        __syncthreads();
         // initial layer size is 128. finally when the layer size is 1, we would have only two numbers. We dont need the initial count of threads anymore
     }
     
@@ -83,17 +66,26 @@ __global__ void reduce_kernel(const float* input, float* output, int N)
     if(thread_index == 0) output[blockIdx.x] = shared_data[0];
 }
 
-float reduce_operation(float* input, float* output, int N)
+struct FusedExpMax
 {
-    // input is a device pointer of size N
-    // output is a device pointer of size = blocksPerGrid
+    float safe_value = INFINITY;
+    __device__ float operator()(float a, float b){return fminf(a, b);}
+    __device__ float alloc(float a) {return a;}
+};
+
+
+template<typename Operation>
+float reduce_operation(float* input, float* output, int N, const Operation& op)
+{
+    // input is a device pointer of size N. input is modified. please supply a copy because this function will gut it properly lol
+    // output is a device pointer of size atleast = blocksPerGrid
     // output could be a larger array. But we need only till blocksPerGrid during each iteration
 
-    int threadsPerBlock = 256;
-    int blocksPerGrid = (N + threadsPerBlock - 1) / threadsPerBlock;
+    const int threadsPerBlock = 256;
+    const int blocksPerGrid = (N + threadsPerBlock - 1) / threadsPerBlock;
     // doing recursive reduction as that is more easy to understand and keep things from getting more memory messy
     
-    reduce_kernel<<<blocksPerGrid, threadsPerBlock>>>(input, output, N);
+    reduce_kernel<<<blocksPerGrid, threadsPerBlock, threadsPerBlock*sizeof(float)>>>(input, output, N, op);
     cudaDeviceSynchronize();
 
     if(blocksPerGrid == 1)
@@ -118,10 +110,23 @@ float reduce_operation(float* input, float* output, int N)
         // we dont need the inputs right? so lemme gut it out
         float *current_output = input;
 
-        return reduce_operation(current_input, current_output, blocksPerGrid);
+        return reduce_operation(current_input, current_output, blocksPerGrid, op);
     }
 }
 
+struct MaxOperation
+{
+    float safe_value = -INFINITY;
+    __device__ float operator()(float a, float b){return fmaxf(a, b);}
+    __device__ float alloc(float a) {return a;}
+};
+
+struct SumOperation
+{
+    float safe_value = 0.0f;
+    __device__ float operator()(float a, float b) {return a+b;}
+    __device__ float alloc(float a) {return a;}
+};
 
 
 // input, output are device pointers (i.e. pointers to memory on the GPU)
@@ -131,6 +136,24 @@ void solve(const float* input, float* output, int N) {
 
     exp_kernel<<<blocksPerGrid, threadsPerBlock>>>(input, output, N);
 
+    // lets find the max and rescale. cub style allocation 
+    float *temp_input;
+    float *temp_output;
+    cudaMalloc(&temp_input,  N*sizeof(float));
+    cudaMalloc(&temp_output, blocksPerGrid*sizeof(float));
+
+    // alloc input and find the maximum
+    cudaMemcpy(temp_input, output, N*sizeof(float), cudaMemcpyDefault);
+    float max_value = reduce_operation(temp_input, temp_output, N, MaxOperation());
+
+    // scale operation
+    scale_kernel<<<blocksPerGrid, threadsPerBlock>>>(output, N, 1.0f/max_value);
+
+    // reduce sum now
+    cudaMemcpy(temp_input, output, N*sizeof(float), cudaMemcpyDefault);
+    float sum_value = reduce_operation(temp_input, temp_output, N, SumOperation());
+
+    scale_kernel<<<blocksPerGrid, threadsPerBlock>>>(output, N, 1.0f/sum_value);
 
     cudaDeviceSynchronize();
 }
