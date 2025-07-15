@@ -1,4 +1,4 @@
-#include<exception>
+#include <exception>
 #include <stdexcept>
 #include <iostream>
 int main()

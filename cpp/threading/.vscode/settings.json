@@ -2,19 +2,19 @@
     "files.associations": {
         "*.sdf": "xml",
         "*.world": "xml",
+        "condition_variable": "cpp",
+        "any": "cpp",
         "array": "cpp",
         "atomic": "cpp",
         "bit": "cpp",
-        "*.tcc": "cpp",
-        "bitset": "cpp",
         "cctype": "cpp",
         "charconv": "cpp",
         "chrono": "cpp",
         "clocale": "cpp",
         "cmath": "cpp",
         "compare": "cpp",
+        "complex": "cpp",
         "concepts": "cpp",
-        "condition_variable": "cpp",
         "cstdarg": "cpp",
         "cstddef": "cpp",
         "cstdint": "cpp",
@@ -43,6 +43,7 @@
         "tuple": "cpp",
         "type_traits": "cpp",
         "utility": "cpp",
+        "format": "cpp",
         "initializer_list": "cpp",
         "iomanip": "cpp",
         "iosfwd": "cpp",
@@ -62,10 +63,7 @@
         "thread": "cpp",
         "typeinfo": "cpp",
         "variant": "cpp",
-        "format": "cpp",
-        "__nullptr": "cpp",
-        "any": "cpp",
-        "complex": "cpp",
-        "fstream": "cpp"
+        "barrier": "cpp",
+        "shared_mutex": "cpp"
     }
 }
